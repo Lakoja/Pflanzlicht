@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Lakoja on github.com
+ * Copyright (C) 2019 Lakoja on github.com
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,20 +14,27 @@
  * limitations under the License.
  */
  
- #include <Adafruit_SleepyDog.h>
+#include <Adafruit_SleepyDog.h>
+#include "ActivityMonitor.h"
+#include "BrightnessPin.h"
+
+const int BRIGHT_PIN = A3;
+
+ActivityMonitor brightness(8*4);
+ActivityMonitor activitym(24*4);
+BrightnessPin pin(BRIGHT_PIN);
 
 unsigned long sleptTime;
 
 const int LIGHT_PIN_B = 9;
 const int LIGHT_PIN_R = 11;
-const int BRIGHT_PIN = A3;
 const int LED_PIN = 13;
 
-const byte MAX_BRIGHT = 220;
+const byte MAX_BRIGHT = 240;
 const float BLUE_PART = 0.4;
 const float CLOCK_ADJUST = 1.045;
 
-const unsigned long minutes15 = 15L * 60 * 1000;
+const unsigned long MINUTES15 = 15L * 60 * 1000;
 
 unsigned long lastOutputTime;
 unsigned long lastBrightCheck;
@@ -38,6 +45,7 @@ unsigned long lastSbaOut;
 byte bright[8*4];
 unsigned int brightPointer = 0;
 unsigned long lastBrightRecord = 0;
+unsigned long lastActivityRecord = 0;
 byte activity[24*4];
 int lastActivityPointer = -1;
 
@@ -49,7 +57,6 @@ void setup() {
   memset(bright, 0, sizeof(bright));
   memset(activity, 0, sizeof(activity));
 
-  pinMode(BRIGHT_PIN, INPUT);
   pinMode(LED_PIN, OUTPUT);
 
   // show a start animation and blink current value
@@ -220,20 +227,21 @@ void show()
 bool shouldBeActive()
 {
   // not in the morning/night (only day and evening)
-  // not more than 6 hours in 24 hours
+  // not more than 5 hours in 24 hours
   // not more than 4 hours maximum brightness
 
   bool nearTheDay = isNearTheDay(false);
-  int activityIn20 = countActivity(false);
-  int sumActivityIn23 = sumActivity(false);
+  int activityIn24 = countActivity(false);
+  int sumActivityIn24 = sumActivity(false);
   int sumBorder = 4*4 * MAX_BRIGHT;
 
-  bool shouldBeActive = (nearTheDay || justStarted()) && activityIn20 < 6*4 && sumActivityIn23 < sumBorder;
+  bool shouldBeActive = (nearTheDay || justStarted()) && activityIn24 < 5*4 && sumActivityIn24 < sumBorder;
 
 
   unsigned long now = getNow(0);
   if (now - lastSbaOut >= 2000) {
-    Serial.println("sba near "+String(nearTheDay)+" act "+String(activityIn20)+" sum "+String(sumActivityIn23)+" -> "+String(shouldBeActive));
+    //Serial.println("A "+activitym.dump());
+    Serial.println("sba near "+String(nearTheDay)+" act "+String(activityIn24)+" sum "+String(sumActivityIn24)+" -> "+String(shouldBeActive));
   
     lastSbaOut = now;
   }
@@ -251,27 +259,10 @@ bool isNearTheDay(bool debug)
   return countLightsIn6Hours(debug) > 1;
 }
 
-// not more than one "light" in the last 4 hours?
-bool wasFullyDark()
-{
-  int lightCounter = 0;
-  int validValuesCounter = 0;
-  for (int i = 0; i < 4*4; i++) {
-    byte value = getBrightnessBack(i);
-    
-    if (value > 0) {
-      validValuesCounter++;
-      if (isDay(value)) {
-        lightCounter++;
-      }
-    }
-  }
-
-  return validValuesCounter > 1 && lightCounter < 2;
-}
-
 int countLightsIn6Hours(bool debug)
 {
+  return brightness.countLightBack(6*4);
+  /*
   int lightCounter = 0;
   if (debug) {
     Serial.print("C");
@@ -295,10 +286,13 @@ int countLightsIn6Hours(bool debug)
   }
 
   return lightCounter;
+  */
 }
 
 bool justStarted()
 {
+  return brightness.countValues() < 2;
+  /*
   int validValuesCounter = 0;
   // only probe beginning of array
   for (int i = 0; i < 4; i++) {
@@ -310,21 +304,32 @@ bool justStarted()
   }
 
   return validValuesCounter < 2;
+  */
 }
 
 void recordBrightness(unsigned long now, byte current, bool force)
 {
-  if (force || now - lastBrightRecord >= minutes15) {
-    bright[brightPointer] = current;
+  if (force || now - lastBrightRecord >= MINUTES15) {
+    brightness.record(current);
     lastBrightRecord = now;
+    /*
+    bright[brightPointer] = current;
     brightPointer = (brightPointer + 1) % sizeof(bright);
+    */
     Serial.println("Recording B "+String(current));
   }
 }
 
 void recordActivity(unsigned long now, byte value)
 {
-  unsigned int activityPointer = (now / minutes15) % sizeof(activity);
+  unsigned int activityPointer = (now / MINUTES15) % activitym.maximumCount();
+  //Serial.println("Recording A "+String(activityPointer)+": "+String(value)+" count now "+String(activitym.countValues()));
+  bool valueRaised = activitym.record(value, activityPointer);
+
+  if (valueRaised) {
+    Serial.println("Recording A "+String(activityPointer)+": "+String(value)+" count now "+String(activitym.countValues()));
+  }
+  /*
   if (activityPointer != lastActivityPointer) {
     activity[activityPointer] = 0;
     lastActivityPointer = activityPointer;
@@ -332,11 +337,13 @@ void recordActivity(unsigned long now, byte value)
   if (value > activity[activityPointer]) {
     activity[activityPointer] = value;
     Serial.println("Recording A "+String(activityPointer)+": "+String(value));
-  }
+  }*/
 }
 
 int countActivity(bool debug)
 {
+  return activitym.countValues();
+  /*
   if (debug) {
     Serial.print("A(");
   }
@@ -359,10 +366,13 @@ int countActivity(bool debug)
   }
 
   return activityCounter;
+  */
 }
 
 int sumActivity(bool debug)
 {
+  return activitym.sumValues();
+  /*
   if (debug) {
     Serial.print("S(");
   }
@@ -383,26 +393,12 @@ int sumActivity(bool debug)
   }
 
   return activitySum;
-}
-
-
-int countActivity10()
-{
-  int activityCounter = 0;
-  for (int i=0; i < 20 * 4; i++) {
-    byte value = getActivityBack(i);
-    
-    if (value >= 10) {
-      activityCounter++;
-    }
-  }
-
-  return activityCounter;
+  */
 }
 
 byte getBrightnessK()
 {
-  return (byte)round(readPin(BRIGHT_PIN));
+  return pin.getBrightnessK();//(byte)round(readPin(BRIGHT_PIN));
 }
 
 double readPin(int pin)
@@ -411,9 +407,6 @@ double readPin(int pin)
   double vcc = readVcc();
 
   int val = analogRead(pin);
-  
-  if (val == 0)
-    val = 1; // 0 is invalid input below
 
   double valVoltage = (val / 1023.0) * vcc;
 
@@ -425,13 +418,6 @@ double readPin(int pin)
     t = 0.00001;
   }
   double kOhm = valVoltage / t * 1.2;
-
-  /* old - without vcc
-  if (val == 0)
-    val = 1; // 0 is invalid input below
-  double part = val / 1023.0;
-  double ohm = (1200 * part) / (1 - part); // with 2k2 resistance
-  */
 
   return kOhm;
 }
