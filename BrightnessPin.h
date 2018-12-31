@@ -34,6 +34,11 @@ public:
     return (byte)round(readPin(pin));
   }
 
+  double getBrightnessKD()
+  {
+    return readPin(pin);
+  }
+
 private:
   double readPin(int pin)
   {

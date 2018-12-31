@@ -149,7 +149,7 @@ void loop() {
     unsigned int minutes = seconds / 60;
     unsigned int r_seconds = seconds % 60;
     
-    double kOhm = readPin(BRIGHT_PIN);
+    double kOhm = pin.getBrightnessKD();
     // String(num++)+
     Serial.println(String(minutes)+":"+String(r_seconds)+": "+String(kOhm)+" ");
     
@@ -179,24 +179,13 @@ void loop() {
 
   recordActivity(now, currentlyDesired);
 
-/*
-  if (now - lastLongTime > 100000) {
-    unsigned long nowR = now;
-    int hours = nowR / (1000L * 60 * 60);
-    nowR = nowR % (1000L * 60 * 60);
-    int minutes = nowR / (1000L * 60);
-    nowR = nowR % (1000L * 60);
-    int seconds = nowR / 1000L;
-
-    Serial.println("Passed "+String(hours)+":"+String(minutes)+":"+String(seconds));
-    
-    lastLongTime = now;
-  }
-  */
-
   if (currentlyDesired != currentlyDisplayed) {
+    // animate brightness change
+    
     delay(500);
   } else {
+    // normal operation (off or on)
+    
     if (currentlyDisplayed == 0) {
       // Sleeping will also deactivate PWM of course
       
@@ -262,49 +251,11 @@ bool isNearTheDay(bool debug)
 int countLightsIn6Hours(bool debug)
 {
   return brightness.countLightBack(6*4);
-  /*
-  int lightCounter = 0;
-  if (debug) {
-    Serial.print("C");
-  }
-  for (int i = 0; i < 6*4; i++) {
-    byte value = getBrightnessBack(i);
-    
-    if (debug) {
-      Serial.print(" "+String(value));
-    }
-    
-    if (value > 0) {
-      if (isDay(value)) {
-        lightCounter++;
-      }
-    }
-  }
-
-  if (debug) {
-    Serial.println();
-  }
-
-  return lightCounter;
-  */
 }
 
 bool justStarted()
 {
   return brightness.countValues() < 2;
-  /*
-  int validValuesCounter = 0;
-  // only probe beginning of array
-  for (int i = 0; i < 4; i++) {
-    byte value = bright[i];
-    
-    if (value > 0) {
-      validValuesCounter++;
-    }
-  }
-
-  return validValuesCounter < 2;
-  */
 }
 
 void recordBrightness(unsigned long now, byte current, bool force)
@@ -312,10 +263,6 @@ void recordBrightness(unsigned long now, byte current, bool force)
   if (force || now - lastBrightRecord >= MINUTES15) {
     brightness.record(current);
     lastBrightRecord = now;
-    /*
-    bright[brightPointer] = current;
-    brightPointer = (brightPointer + 1) % sizeof(bright);
-    */
     Serial.println("Recording B "+String(current));
   }
 }
@@ -329,110 +276,16 @@ void recordActivity(unsigned long now, byte value)
   if (valueRaised) {
     Serial.println("Recording A "+String(activityPointer)+": "+String(value)+" count now "+String(activitym.countValues()));
   }
-  /*
-  if (activityPointer != lastActivityPointer) {
-    activity[activityPointer] = 0;
-    lastActivityPointer = activityPointer;
-  }
-  if (value > activity[activityPointer]) {
-    activity[activityPointer] = value;
-    Serial.println("Recording A "+String(activityPointer)+": "+String(value));
-  }*/
 }
 
 int countActivity(bool debug)
 {
   return activitym.countValues();
-  /*
-  if (debug) {
-    Serial.print("A(");
-  }
-  
-  int activityCounter = 0;
-  for (unsigned int i=0; i < 20 * 4; i++) {
-    byte value = getActivityBack(i);
-    
-    if (debug) {
-      Serial.print(String(value)+",");
-    }
-    
-    if (value > 0) {
-      activityCounter++;
-    }
-  }
-
-  if (debug) {
-    Serial.println(") ");
-  }
-
-  return activityCounter;
-  */
 }
 
 int sumActivity(bool debug)
 {
   return activitym.sumValues();
-  /*
-  if (debug) {
-    Serial.print("S(");
-  }
-  
-  int activitySum = 0;
-  for (int i=0; i < 23 * 4; i++) {
-    byte value = getActivityBack(i);
-
-    if (debug) {
-      Serial.print(String(i)+":"+String(value)+",");
-    }
-    
-    activitySum += value;
-  }
-
-  if (debug) {
-    Serial.println(")");
-  }
-
-  return activitySum;
-  */
-}
-
-byte getBrightnessK()
-{
-  return pin.getBrightnessK();//(byte)round(readPin(BRIGHT_PIN));
-}
-
-double readPin(int pin)
-{
-  // 5V -> 1k2 -> LDR -> GND
-  double vcc = readVcc();
-
-  int val = analogRead(pin);
-
-  double valVoltage = (val / 1023.0) * vcc;
-
-  // more complex but the same (*1000)
-  //double x = (1200*voltage/vcc)/(1-voltage/vcc);
-
-  double t = vcc - valVoltage;
-  if (t == 0) {
-    t = 0.00001;
-  }
-  double kOhm = valVoltage / t * 1.2;
-
-  return kOhm;
-}
-
-double readVcc() {
-  // Read 1.1V reference against AVcc
-  ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
-  delay(2); // Wait for Vref to settle
-  ADCSRA |= _BV(ADSC); // Convert
-  while (bit_is_set(ADCSRA,ADSC));
-  long result = ADCL;
-  result |= ADCH<<8;
-  result = 1125300L / result; // Back-calculate AVcc in mV
-  
-  return result / 1000.0;
 }
 
 unsigned long getNow(unsigned long offset)
@@ -442,24 +295,7 @@ unsigned long getNow(unsigned long offset)
   return millis() + sleptTime;
 }
 
-byte getBrightnessBack(int stepsBackward)
+byte getBrightnessK()
 {
-  int pointer = brightPointer - 1;
-  int p = pointer - stepsBackward;
-  if (p < 0) {
-    p = p + sizeof(bright);
-  }
-  
-  return bright[p];
-}
-
-byte getActivityBack(int stepsBackward)
-{
-  int pointer = lastActivityPointer;
-  int p = pointer - stepsBackward;
-  if (p < 0) {
-    p = p + sizeof(activity);
-  }
-  
-  return activity[p];
+  return pin.getBrightnessK();
 }
