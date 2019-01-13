@@ -162,20 +162,19 @@ void loop() {
   if (shouldBeActive() && !isDay(current)) {
     if (now - lastBrightCheck >= 5000 || first) {
       first = false;
-      // 10 -> little light (20)
-      // 70 -> maximum (180)
+      // 10 -> little light (30)
+      // 80 -> maximum (240)
   
-      currentlyDesired = (int)min(MAX_BRIGHT, round(current * 2.7));
+      currentlyDesired = (int)min(MAX_BRIGHT, 3 * current);
       //Serial.println("bright->desired "+String(current)+"->"+String(currentlyDesired));
 
       lastBrightCheck = now;
     }
-    
-    show();
   } else {
     currentlyDesired = 0;
-    show();
   }
+
+  show();
 
   recordActivity(now, currentlyDesired);
 
@@ -188,9 +187,9 @@ void loop() {
     
     if (currentlyDisplayed == 0) {
       // Sleeping will also deactivate PWM of course
-      
+
       Serial.flush();
-      int sleptMs = (int)(CLOCK_ADJUST * Watchdog.sleep(8000));
+      int sleptMs = round(CLOCK_ADJUST * Watchdog.sleep(8000));
       getNow(sleptMs);
     } else {
       delay(8000);
@@ -209,7 +208,7 @@ void show()
     
     analogWrite(LIGHT_PIN_R, currentlyDisplayed);
     analogWrite(LIGHT_PIN_B, round(currentlyDisplayed * BLUE_PART));
-    //Serial.println("Output "+String(currentlyDisplayed)+"->"+String(currentlyDesired));
+    //Serial.println("Output "+String(currentlyDisplayed)+" on path to "+String(currentlyDesired));
   }
 }
 
@@ -225,7 +224,6 @@ bool shouldBeActive()
   int sumBorder = 4*4 * MAX_BRIGHT;
 
   bool shouldBeActive = (nearTheDay || justStarted()) && activityIn24 < 5*4 && sumActivityIn24 < sumBorder;
-
 
   unsigned long now = getNow(0);
   if (now - lastSbaOut >= 2000) {
