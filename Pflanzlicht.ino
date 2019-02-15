@@ -20,8 +20,9 @@
 
 const int BRIGHT_PIN = A3;
 
+// only monitor the necessary hour count
 ActivityMonitor brightness(8*4);
-ActivityMonitor activitym(24*4);
+ActivityMonitor activitym(12*4);
 BrightnessPin pin(BRIGHT_PIN);
 
 unsigned long sleptTime;
@@ -35,18 +36,15 @@ const float BLUE_PART = 0.4;
 const float CLOCK_ADJUST = 1.045;
 
 const unsigned long MINUTES15 = 15L * 60 * 1000;
+const unsigned int SLEEP_TIME = 8000;
 
 unsigned long lastOutputTime;
 unsigned long lastBrightCheck;
 bool first = true;
 unsigned long lastSbaOut;
+unsigned long lastDump;
 
-// record brightness of last 8 hours
-byte bright[8*4];
-unsigned int brightPointer = 0;
 unsigned long lastBrightRecord = 0;
-unsigned long lastActivityRecord = 0;
-byte activity[24*4];
 int lastActivityPointer = -1;
 
 int currentlyDesired = 0;
@@ -54,8 +52,6 @@ int currentlyDisplayed = 0;
 
 void setup() {
   Serial.begin(115200);
-  memset(bright, 0, sizeof(bright));
-  memset(activity, 0, sizeof(activity));
 
   pinMode(LED_PIN, OUTPUT);
 
@@ -64,50 +60,7 @@ void setup() {
 
   byte current = getBrightnessK();
 
-  int blinkValueLength = 0;
-  if (current < 25) {
-    Serial.println("Showing "+String(current));
-    blinkValueLength = (current / 5) * 5 + (current % 5) * 2;
-  }
-  int blinkValues[blinkValueLength];
-  if (blinkValueLength > 0) {
-    int b = 0;
-    for (int i=0; i<current / 5; i++) {
-      blinkValues[b++] = HIGH;
-      blinkValues[b++] = HIGH;
-      blinkValues[b++] = HIGH;
-      blinkValues[b++] = LOW;
-      blinkValues[b++] = LOW;
-    }
-    for (int i=0; i<current % 5; i++) {
-      blinkValues[b++] = HIGH;
-      blinkValues[b++] = LOW;
-    }
-  }
-
-  int startAnimationLength = 11;
-  int startAnimation[startAnimationLength];
-
-  int s = 0;
-  for (int i=1; i<7 && s<startAnimationLength; i++) {
-    int led_value = i * 20;
-    startAnimation[s++] = led_value;
-  }
-
-  for (int i=5; i>0 && s<startAnimationLength; i--) {
-    int led_value = i * 20;
-    startAnimation[s++] = led_value;
-  }
-
-  for (int i=0; i<startAnimationLength || i<blinkValueLength; i++) {
-    if (i<startAnimationLength) {
-      analogWrite(random(2) < 1 ? LIGHT_PIN_R : LIGHT_PIN_B, startAnimation[i]);
-    }
-    if (i<blinkValueLength) {
-      digitalWrite(LED_PIN, blinkValues[i]);
-    }
-    delay(200);
-  }
+  blinkStart(current);
 
   analogWrite(LIGHT_PIN_R, 0);
   analogWrite(LIGHT_PIN_B, 0);
@@ -189,10 +142,10 @@ void loop() {
       // Sleeping will also deactivate PWM of course
 
       Serial.flush();
-      int sleptMs = round(CLOCK_ADJUST * Watchdog.sleep(8000));
+      int sleptMs = round(CLOCK_ADJUST * Watchdog.sleep(SLEEP_TIME));
       getNow(sleptMs);
     } else {
-      delay(8000);
+      delay(SLEEP_TIME);
     }
   }
 }
@@ -228,9 +181,16 @@ bool shouldBeActive()
   unsigned long now = getNow(0);
   if (now - lastSbaOut >= 2000) {
     //Serial.println("A "+activitym.dump());
-    Serial.println("sba near "+String(nearTheDay)+" act "+String(activityIn24)+" sum "+String(sumActivityIn24)+" -> "+String(shouldBeActive));
+    Serial.println("SBAc "+String(getActivityPointer(now))+" near "+String(nearTheDay)+" act "+String(activityIn24)+" sum "+String(sumActivityIn24)+" -> "+String(shouldBeActive));
   
     lastSbaOut = now;
+  }
+
+  if (now - lastDump >= 60000L) {
+    Serial.println("ACT "+activitym.dump());
+    Serial.println("BRI "+brightness.dump());
+    
+    lastDump = now;
   }
   
   return shouldBeActive;
@@ -261,29 +221,90 @@ void recordBrightness(unsigned long now, byte current, bool force)
   if (force || now - lastBrightRecord >= MINUTES15) {
     brightness.record(current);
     lastBrightRecord = now;
-    Serial.println("Recording B "+String(current));
+    Serial.println("Recording B "+String(current)+" lights last "+String(brightness.countLightBack(6*4)));
   }
 }
 
 void recordActivity(unsigned long now, byte value)
 {
-  unsigned int activityPointer = (now / MINUTES15) % activitym.maximumCount();
+  unsigned int activityPointer = getActivityPointer(now);
+  bool raiseOnly = activityPointer == lastActivityPointer;
+  lastActivityPointer = activityPointer;
+  
   //Serial.println("Recording A "+String(activityPointer)+": "+String(value)+" count now "+String(activitym.countValues()));
-  bool valueRaised = activitym.record(value, activityPointer);
+  bool valueChanged = activitym.record(value, activityPointer, raiseOnly);
 
-  if (valueRaised) {
+  if (valueChanged) {
     Serial.println("Recording A "+String(activityPointer)+": "+String(value)+" count now "+String(activitym.countValues()));
   }
 }
 
 int countActivity(bool debug)
 {
+  if (debug) {
+    unsigned int activityPointer = getActivityPointer(getNow(0));
+    Serial.println("A "+String(activityPointer)+": "+activitym.dump());
+  }
+  
   return activitym.countValues();
 }
 
 int sumActivity(bool debug)
 {
   return activitym.sumValues();
+}
+
+unsigned int getActivityPointer(unsigned long now)
+{
+  return (now / MINUTES15) % activitym.maximumCount();
+}
+
+void blinkStart(byte current)
+{
+  int blinkValueLength = 0;
+  if (current < 25) {
+    Serial.println("Showing "+String(current));
+    blinkValueLength = (current / 5) * 5 + (current % 5) * 2;
+  }
+  int blinkValues[blinkValueLength];
+  if (blinkValueLength > 0) {
+    int b = 0;
+    for (int i=0; i<current / 5; i++) {
+      blinkValues[b++] = HIGH;
+      blinkValues[b++] = HIGH;
+      blinkValues[b++] = HIGH;
+      blinkValues[b++] = LOW;
+      blinkValues[b++] = LOW;
+    }
+    for (int i=0; i<current % 5; i++) {
+      blinkValues[b++] = HIGH;
+      blinkValues[b++] = LOW;
+    }
+  }
+
+  int startAnimationLength = 11;
+  int startAnimation[startAnimationLength];
+
+  int s = 0;
+  for (int i=1; i<7 && s<startAnimationLength; i++) {
+    int led_value = i * 20;
+    startAnimation[s++] = led_value;
+  }
+
+  for (int i=5; i>0 && s<startAnimationLength; i--) {
+    int led_value = i * 20;
+    startAnimation[s++] = led_value;
+  }
+
+  for (int i=0; i<startAnimationLength || i<blinkValueLength; i++) {
+    if (i<startAnimationLength) {
+      analogWrite(random(2) < 1 ? LIGHT_PIN_R : LIGHT_PIN_B, startAnimation[i]);
+    }
+    if (i<blinkValueLength) {
+      digitalWrite(LED_PIN, blinkValues[i]);
+    }
+    delay(200);
+  }
 }
 
 unsigned long getNow(unsigned long offset)

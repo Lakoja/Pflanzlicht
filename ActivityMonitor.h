@@ -44,7 +44,7 @@ public:
     return s;
   }
 
-  bool record(byte value, int index = -1)
+  bool record(byte value, int index = -1, bool raiseOnly = false)
   {
     bool internalUsed = true;
     if (index != -1) {
@@ -58,30 +58,37 @@ public:
       index = pointer;
     }
 
-    bool valueRaised = false;
-
-    if (value > values[index]) {
-      valueRaised = true;
-    }
+    bool doSomething = !raiseOnly;
+    bool valueChanged = false;
     
-    if (values[index] > 0) {
-      sum -= values[index];
-      values[index] = 0;
-      count--;
+    if (raiseOnly && value > values[index]) {
+      doSomething = true;
     }
-    
-    values[index] = value;
 
-    if (value > 0) {
-      sum += value;
-      count++;
+    if (doSomething) {
+      if (value != values[index]) {
+        valueChanged = true;
+      }
+      
+      if (values[index] > 0) {
+        sum -= values[index];
+        values[index] = 0;
+        count--;
+      }
+      
+      values[index] = value;
+  
+      if (value > 0) {
+        sum += value;
+        count++;
+      }
     }
 
     if (internalUsed) {
       pointer = (pointer + 1) % maximumLength;
     }
 
-    return valueRaised;
+    return valueChanged;
   }
 
   byte current(int index = -1)
